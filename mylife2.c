@@ -3,30 +3,39 @@
 #include <unistd.h> // sleep()関数を使う
 #include <string.h>
 #include <time.h>
+#include <math.h>
 
 //------------------------------------------------------------
+//
 // lifファイルの数字は 列 行 の順番
 // 最初の生きたセルの割合がおよそ10%
 // 存在するセルの比率を表示するようにする。
-//
-//
+// 
+// 初期のセルの数を270 ~ 289個に限定する
 //
 //------------------------------------------------------------
-void my_init_cells(const int height, const int width, int cell[height][width], FILE* fp) {
+
+const int INIT_NUM_BASE = 270;
+const int INIT_NUM_DIV = 20;
+
+
+
+int my_init_cells(const int height, const int width, int cell[height][width], FILE* fp) {
   if(fp == NULL) {
-    //NULLの時の処理
-    //default.lif
-    //#Life 1.06
-    // 30 20
-    // 30 22
-    // 31 22
-    // 31 23
-    // 32 20
-    cell[20][30] = 1;
-    cell[22][30] = 1;
-    cell[22][31] = 1;
-    cell[23][31] = 1;
-    cell[20][32] = 1;
+    //初期のセルの比率を決定する
+    srand((unsigned int)time(NULL));
+    int init_num = rand() % 20 + 270;
+    srand((unsigned int)time(NULL));
+    for(int i = 0; i < init_num; i++) {
+      int x;
+      int y;
+      x = rand() % width;
+      y = rand() % height;
+      cell[y][x] = 1;
+    }
+    
+
+    return init_num; //セルの比率を返す
   } else {
     char c;
     //fpの読み込み、値の代入
@@ -38,30 +47,35 @@ void my_init_cells(const int height, const int width, int cell[height][width], F
     char s[10];
     const size_t bufsize = 500;
     char buf[bufsize];
-
+    int init_num = 0;
+      
     fgets(buf, bufsize, fp); //最初の行を飛ばす
 
     while((c = fgetc(fp)) != EOF) {
       if(c == ' ') { //半角スペースの時
+        //xを確定させる
         x = atoi(s);
         memset(s, '\0', sizeof(s));
         cnt = 0;
       } else if(c == '\n') { //改行の時
+        //yを確定させる
         y = atoi(s);
         memset(s, '\0', sizeof(s));
         cnt = 0;
         cell[y][x] = 1;
+        init_num++;
       } else if(c >= '0' && c <= '9'){ //数値の時
         s[cnt] = c;
         cnt++;
       }
     }
+    return init_num;
   }
 }
 
-//暫定
-void my_print_cells(FILE* fp, int gen, const int height, const int width, int cell[height][width]) {
-  fprintf(fp, "generation = %d\n", gen);
+void my_print_cells(FILE* fp, int gen, int init_num, const int height, const int width, int cell[height][width]) {
+  float init_per = (float) init_num / (float)(height * width) * 100;
+  fprintf(fp, "generation = %d, percentage = %3.2f\n", gen, init_per);
   fprintf(fp, "+");
   for(int x = 0; x < width; x++) {
     fprintf(fp, "-");
@@ -113,7 +127,7 @@ int my_count_adjacent_cells(int h, int w, const int height, const int width, int
   return cnt;
 }
 
-void my_update_cells(const int height, const int width, int cell[height][width]) {
+int my_update_cells(const int height, const int width, int cell[height][width]) {
   //一旦移す
   int tempCell[height][width];
   for(int y = 0 ; y < height ; y++){
@@ -139,13 +153,18 @@ void my_update_cells(const int height, const int width, int cell[height][width])
     }
   }
 
+  int cellNum = 0;
   //cellに値を移す
   for(int y = 0 ; y < height ; y++){
     for(int x = 0 ; x < width ; x++){
+      if(tempCell[y][x] == 1) {
+        cellNum++;
+      }
       cell[y][x] = tempCell[y][x];
     }
   }
 
+  return cellNum;
 }
 
 
@@ -154,6 +173,8 @@ int main(int argc, char **argv)
   FILE *fp = stdout;
   const int height = 40;
   const int width = 70;
+
+  int init_num;
 
   int cell[height][width];
   for(int y = 0 ; y < height ; y++){
@@ -170,7 +191,7 @@ int main(int argc, char **argv)
   else if (argc == 2) {
     FILE *lgfile;
     if ( (lgfile = fopen(argv[1],"r")) != NULL ) {
-      my_init_cells(height,width,cell,lgfile); // ファイルによる初期化
+      init_num = my_init_cells(height,width,cell,lgfile); // ファイルによる初期化
     }
     else{
       fprintf(stderr,"cannot open file %s\n",argv[1]);
@@ -179,18 +200,39 @@ int main(int argc, char **argv)
     fclose(lgfile);
   }
   else{
-    my_init_cells(height, width, cell, NULL); // デフォルトの初期値を使う
+    init_num = my_init_cells(height, width, cell, NULL); // デフォルトの初期値を使う
   }
 
-  my_print_cells(fp, 0, height, width, cell); // 表示する
+  my_print_cells(fp, 0, init_num, height, width, cell); // 表示する
   sleep(1); // 1秒休止
 
+  int cell_num;
+
+  FILE *writefile;
+
   /* 世代を進める*/
-  for (int gen = 1 ;; gen++) {
-    my_update_cells(height, width, cell); // セルを更新
-    my_print_cells(fp, gen, height, width, cell);  // 表示する
-    sleep(1); //1秒休止する
-    fprintf(fp,"\e[%dA",height+3);//height+3 の分、カーソルを上に戻す(壁2、表示部1)
+  for (int gen = 1 ; gen < 10000; gen++) {
+    cell_num = my_update_cells(height, width, cell); // セルを更新
+
+    if(gen % 100 == 0) {
+      char filename[12] = "";
+      char generation[10];
+
+      sprintf(generation, "%d", gen);
+
+      // strcat(filename, "lifetxt\\");
+      if(gen / 1000 == 0) {
+        strcat(filename, "gen0");
+      } else {
+        strcat(filename, "gen");
+      }
+      strcat(filename, generation);
+      strcat(filename, ".lif");
+
+      writefile = fopen(filename, "w");
+      my_print_cells(writefile, gen, cell_num, height, width, cell);
+      fclose(writefile);
+    }
   }
 
   return EXIT_SUCCESS;
